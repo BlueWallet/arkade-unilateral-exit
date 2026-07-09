@@ -63,7 +63,7 @@ semver range (`"@arkade-os/sdk": "^<version>"`) and delete `vendor/`. See
 
 ## Deployment
 
-`main` deploys to GitHub Pages via `.github/workflows/deploy.yml`. The Vite `base` defaults to
+`master` deploys to GitHub Pages via `.github/workflows/deploy.yml`. The Vite `base` defaults to
 `/arkade-unilateral-exit/`; override with `BASE_PATH` for a custom domain.
 
 ## License
