@@ -54,10 +54,11 @@ BASE_PATH=/ pnpm preview   # preview the build at the site root
 
 ### SDK dependency
 
-This app depends on the `UnilateralExit` API in `@arkade-os/sdk`. Until that ships to npm, the
-dependency is a local link to a working copy of the SDK
-(`link:../ts-sdk/…`). Once published, replace it with a normal semver range
-(`"@arkade-os/sdk": "^<version>"`) and CI will install cleanly. See
+This app depends on the `UnilateralExit` API in `@arkade-os/sdk`, which is not yet published to
+npm (it lands with [ts-sdk#606](https://github.com/arkade-os/ts-sdk/pull/606)). Until then the
+dependency is a **vendored tarball** (`vendor/arkade-os-sdk-*.tgz`, packed from that branch) so the
+build is self-contained and CI installs cleanly. Once the SDK publishes, replace it with a normal
+semver range (`"@arkade-os/sdk": "^<version>"`) and delete `vendor/`. See
 [`arkade-os/ts-sdk`](https://github.com/arkade-os/ts-sdk) for the SDK and the exit-package format.
 
 ## Deployment
