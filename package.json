@@ -14,7 +14,7 @@
         "lint": "prettier --check ."
     },
     "dependencies": {
-        "@arkade-os/sdk": "file:./vendor/arkade-os-sdk-0.4.43.tgz",
+        "@arkade-os/sdk": "0.4.45",
         "@radix-ui/react-progress": "^1.1.2",
         "@radix-ui/react-slot": "^1.1.2",
         "class-variance-authority": "^0.7.1",
