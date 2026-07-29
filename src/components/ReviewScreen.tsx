@@ -1,12 +1,58 @@
-import type { ExitPackage } from "@arkade-os/sdk";
-import { AlertTriangle, ArrowRight, Clock, Eye } from "lucide-react";
-import { useMemo, useState } from "react";
+import type { ExitDelay, ExitPackage, ExitVtxoInfo } from "@arkade-os/sdk";
+import { AlertTriangle, ArrowRight, ChevronDown, Clock, Eye, Info, Lock } from "lucide-react";
+import { useMemo, useState, type ReactNode } from "react";
 import { esploraUrlFor } from "@/lib/esplora";
 import { btc, cn, formatSats, truncateMiddle } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tooltip } from "@/components/ui/tooltip";
 
-function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
+// ---------------------------------------------------------------------------
+// Derivations
+// ---------------------------------------------------------------------------
+
+/** A block-based delay is ~10 min/block; a seconds delay is taken as-is. */
+function delaySeconds(d: ExitDelay): number {
+    return d.type === "blocks" ? d.value * 600 : d.value;
+}
+
+/** Rough end-to-end estimate: unroll + splitter + sweep confirmations, plus
+ * the longest CSV timelock any VTXO must wait out. Approximate (~10-min blocks). */
+function estimateSeconds(pkg: ExitPackage, active: ExitVtxoInfo[]): number {
+    const unrollTxs = pkg.steps.filter((s) => s.kind === "package" || s.kind === "bump").length;
+    const splitter = pkg.steps.some((s) => s.kind === "broadcast") ? 1 : 0;
+    const confirmBlocks = unrollTxs + splitter + 1; // + the final sweep
+    const maxDelay = active.reduce((m, v) => (v.delay ? Math.max(m, delaySeconds(v.delay)) : m), 0);
+    return confirmBlocks * 600 + maxDelay;
+}
+
+function formatDuration(sec: number): string {
+    if (sec < 60) return "<1 min";
+    const d = Math.floor(sec / 86400);
+    const h = Math.floor((sec % 86400) / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    if (d > 0) return `~${d}d ${h}h`;
+    if (h > 0) return `~${h}h ${m}m`;
+    return `~${m}m`;
+}
+
+/** Friendly label for a `${contractType}:${pathHint}` exit path. */
+function pathLabel(path?: string): string {
+    if (!path) return "exit path";
+    if (path.startsWith("vhtlc")) return "VHTLC claim";
+    if (path.startsWith("default")) return "unilateral exit";
+    return path;
+}
+
+function delayLabel(d: ExitDelay): string {
+    if (d.type === "blocks") return `${d.value}-block timelock`;
+    const mins = Math.round(d.value / 60);
+    return `~${mins}-min timelock`;
+}
+
+// ---------------------------------------------------------------------------
+
+function Stat({ label, value, hint }: { label: string; value: ReactNode; hint?: ReactNode }) {
     return (
         <div className="flex flex-col gap-0.5">
             <span className="text-[11px] uppercase tracking-wide text-ink-faint">{label}</span>
@@ -24,10 +70,13 @@ export function ReviewScreen({
     onContinue: (esploraUrl: string) => void;
 }) {
     const [esplora, setEsplora] = useState(() => esploraUrlFor(pkg.network));
+    const [showAdvanced, setShowAdvanced] = useState(false);
     const active = pkg.vtxos.filter((v) => !v.skipped);
     const skipped = pkg.vtxos.filter((v) => v.skipped);
     const graph = pkg.mode === "graph";
 
+    const exitingValue = active.reduce((s, v) => s + (v.value ?? 0), 0);
+    const estimate = useMemo(() => estimateSeconds(pkg, active), [pkg, active]);
     const expired = useMemo(
         () => (pkg.validUntil ? Date.now() / 1000 > pkg.validUntil : false),
         [pkg.validUntil],
@@ -53,10 +102,20 @@ export function ReviewScreen({
                         </span>
                     </div>
                 </CardHeader>
-                <CardContent className="grid grid-cols-2 gap-5 sm:grid-cols-4">
-                    <Stat label="Transactions" value={String(pkg.totals.txCount)} />
+                <CardContent className="grid grid-cols-2 gap-5 sm:grid-cols-3">
                     <Stat
-                        label="Total fees"
+                        label="VTXOs exiting"
+                        value={String(active.length)}
+                        hint={`${pkg.totals.txCount} transactions`}
+                    />
+                    <Stat label="Total value" value={formatSats(exitingValue)} />
+                    <Stat
+                        label="You recover"
+                        value={btc(pkg.totals.recoveredSats)}
+                        hint={formatSats(pkg.totals.recoveredSats)}
+                    />
+                    <Stat
+                        label="Network fees"
                         value={formatSats(pkg.totals.totalFeeSats)}
                         hint={`${pkg.feeRate} sat/vB`}
                     />
@@ -66,9 +125,15 @@ export function ReviewScreen({
                         hint={graph ? "to a throwaway fee address" : "to the fee wallet"}
                     />
                     <Stat
-                        label="You recover"
-                        value={btc(pkg.totals.recoveredSats)}
-                        hint={formatSats(pkg.totals.recoveredSats)}
+                        label="Est. time"
+                        value={formatDuration(estimate)}
+                        hint={
+                            <Tooltip content="Approximate: confirmation of each unroll tx (~10-min blocks) plus the longest CSV timelock a VTXO must wait out before its sweep.">
+                                <span className="inline-flex items-center gap-1 border-b border-dotted border-ink-faint">
+                                    how? <Info className="size-3" />
+                                </span>
+                            </Tooltip>
+                        }
                     />
                 </CardContent>
             </Card>
@@ -99,35 +164,55 @@ export function ReviewScreen({
 
             <Card>
                 <CardHeader>
-                    <CardTitle>Destination &amp; VTXOs</CardTitle>
+                    <CardTitle>Destination</CardTitle>
                 </CardHeader>
-                <CardContent className="flex flex-col gap-3">
-                    <div className="flex items-center justify-between text-sm">
-                        <span className="text-ink-dim">Sweep address</span>
-                        <span className="tabular text-xs text-ink" title={pkg.sweepAddress}>
-                            {truncateMiddle(pkg.sweepAddress, 10, 8)}
-                        </span>
-                    </div>
+                <CardContent className="flex items-center justify-between gap-3 text-sm">
+                    <span className="flex items-center gap-1.5 text-ink-dim">
+                        Sweep address
+                        <Tooltip content="Fixed at package creation. The sweep transactions are pre-signed to this address, so it can't be changed here.">
+                            <Lock className="size-3.5" />
+                        </Tooltip>
+                    </span>
+                    <span className="tabular text-xs text-ink" title={pkg.sweepAddress}>
+                        {truncateMiddle(pkg.sweepAddress, 12, 10)}
+                    </span>
+                </CardContent>
+            </Card>
+
+            <Card>
+                <CardHeader className="flex-row items-center justify-between">
+                    <CardTitle>VTXOs being exited</CardTitle>
+                    <span className="text-xs text-ink-dim">
+                        {active.length} ·{" "}
+                        <span className="tabular">{formatSats(exitingValue)}</span>
+                    </span>
+                </CardHeader>
+                <CardContent>
                     <div className="divide-y divide-line rounded-[var(--radius)] border border-line">
                         {active.map((v) => (
                             <div
                                 key={v.outpoint}
                                 className="flex items-center justify-between gap-3 p-3"
                             >
-                                <span className="tabular text-xs text-ink-dim" title={v.outpoint}>
-                                    {truncateMiddle(v.outpoint, 10, 8)}
-                                </span>
-                                <div className="flex items-center gap-3 text-xs">
+                                <Tooltip content={`VTXO outpoint (txid:vout): ${v.outpoint}`}>
+                                    <span className="tabular text-xs text-ink-dim">
+                                        {truncateMiddle(v.outpoint, 10, 8)}
+                                    </span>
+                                </Tooltip>
+                                <div className="flex items-center gap-2 text-xs">
                                     {v.path && (
-                                        <span className="rounded bg-panel-2 px-1.5 py-0.5 text-ink-dim">
-                                            {v.path}
-                                        </span>
+                                        <Tooltip content="The tapscript path this VTXO is spent through onchain.">
+                                            <span className="rounded bg-panel-2 px-1.5 py-0.5 text-ink-dim">
+                                                {pathLabel(v.path)}
+                                            </span>
+                                        </Tooltip>
                                     )}
                                     {v.delay && (
-                                        <span className="text-ink-faint">
-                                            +{v.delay.value}{" "}
-                                            {v.delay.type === "blocks" ? "blk" : "s"}
-                                        </span>
+                                        <Tooltip content="The sweep becomes spendable only after this relative timelock elapses from its exit tx confirming.">
+                                            <span className="rounded bg-panel-2 px-1.5 py-0.5 text-ink-dim">
+                                                {delayLabel(v.delay)}
+                                            </span>
+                                        </Tooltip>
                                     )}
                                     <span className="tabular text-ink">
                                         {formatSats(v.value ?? 0)}
@@ -150,24 +235,41 @@ export function ReviewScreen({
                 </CardContent>
             </Card>
 
-            <Card>
-                <CardHeader>
-                    <CardTitle>Esplora endpoint</CardTitle>
-                </CardHeader>
-                <CardContent className="flex flex-col gap-2">
-                    <input
-                        value={esplora}
-                        onChange={(e) => setEsplora(e.target.value)}
-                        spellCheck={false}
-                        className="w-full rounded-[var(--radius)] border border-line bg-panel/60 p-2.5 font-mono text-xs text-ink focus:border-ink-faint focus:outline-none"
+            <div className="flex flex-col gap-2">
+                <button
+                    onClick={() => setShowAdvanced((s) => !s)}
+                    className="inline-flex w-fit items-center gap-1 text-xs text-ink-dim transition-colors hover:text-ink"
+                >
+                    <ChevronDown
+                        className={cn(
+                            "size-3.5 transition-transform",
+                            showAdvanced && "rotate-180",
+                        )}
                     />
-                    <p className="text-[11px] text-ink-dim">
-                        Must be CORS-permissive and expose{" "}
-                        <span className="tabular">/txs/package</span>. Defaulted for{" "}
-                        <span className="tabular">{pkg.network}</span>.
-                    </p>
-                </CardContent>
-            </Card>
+                    Advanced settings
+                </button>
+                {showAdvanced && (
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Esplora endpoint</CardTitle>
+                        </CardHeader>
+                        <CardContent className="flex flex-col gap-2">
+                            <input
+                                value={esplora}
+                                onChange={(e) => setEsplora(e.target.value)}
+                                spellCheck={false}
+                                className="w-full rounded-[var(--radius)] border border-line bg-panel/60 p-2.5 font-mono text-xs text-ink focus:border-ink-faint focus:outline-none"
+                            />
+                            <p className="text-[11px] text-ink-dim">
+                                Defaults to the SDK endpoint for{" "}
+                                <span className="tabular">{pkg.network}</span>. Override only if you
+                                run your own — must be CORS-permissive and expose{" "}
+                                <span className="tabular">/txs/package</span>.
+                            </p>
+                        </CardContent>
+                    </Card>
+                )}
+            </div>
 
             <Button
                 size="lg"
