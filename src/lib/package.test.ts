@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decodePackageBlob, packageParamFromUrl } from "./package";
+import { decodePackageBlob, encodeExitBundle, packageParamFromUrl } from "./package";
 import type { ExitPackage } from "@arkade-os/sdk";
 
 const pkg: ExitPackage = {
@@ -33,22 +33,67 @@ async function gzipToBase64url(text: string): Promise<string> {
 
 describe("decodePackageBlob", () => {
     it("decodes raw JSON", async () => {
-        expect(await decodePackageBlob(json)).toEqual(pkg);
+        expect(await decodePackageBlob(json)).toEqual({ pkg });
     });
 
     it("decodes base64url(JSON)", async () => {
         const b64 = bytesToBase64url(new TextEncoder().encode(json));
-        expect(await decodePackageBlob(b64)).toEqual(pkg);
+        expect(await decodePackageBlob(b64)).toEqual({ pkg });
     });
 
     it("decodes base64url(gzip(JSON)) — the share-link form", async () => {
         const blob = await gzipToBase64url(json);
-        expect(await decodePackageBlob(blob)).toEqual(pkg);
+        expect(await decodePackageBlob(blob)).toEqual({ pkg });
     });
 
     it("rejects an unknown version via the SDK validator", async () => {
         const bad = JSON.stringify({ ...pkg, version: 2 });
         await expect(decodePackageBlob(bad)).rejects.toThrow(/version/i);
+    });
+});
+
+describe("decodePackageBlob rejects render-crashing packages", () => {
+    // These clear the SDK's deserializeExitPackage checks (valid version/steps)
+    // but would throw during render — they must be rejected at decode instead.
+    it("rejects a package with no totals", async () => {
+        const noTotals: Record<string, unknown> = { ...pkg };
+        delete noTotals.totals;
+        await expect(decodePackageBlob(JSON.stringify(noTotals))).rejects.toThrow(/totals/i);
+    });
+
+    it("rejects a non-numeric totals field", async () => {
+        const bad = { ...pkg, totals: { ...pkg.totals, txCount: "lots" } };
+        await expect(decodePackageBlob(JSON.stringify(bad))).rejects.toThrow(/totals/i);
+    });
+
+    it("rejects a vtxo whose outpoint is not a string", async () => {
+        const bad = { ...pkg, vtxos: [{ outpoint: 123, value: 1000 }] };
+        await expect(decodePackageBlob(JSON.stringify(bad))).rejects.toThrow(/outpoint/i);
+    });
+
+    it("rejects a vtxo whose value is not a number", async () => {
+        const bad = { ...pkg, vtxos: [{ outpoint: "aa:0", value: "lots" }] };
+        await expect(decodePackageBlob(JSON.stringify(bad))).rejects.toThrow(/value/i);
+    });
+});
+
+describe("encodeExitBundle / decodePackageBlob round-trip", () => {
+    const feeKeyHex = "ab".repeat(32);
+
+    it("embeds the fee key and recovers it on decode", async () => {
+        const blob = encodeExitBundle(pkg, feeKeyHex);
+        expect(await decodePackageBlob(blob)).toEqual({ pkg, feeKeyHex });
+    });
+
+    it("emits a bare package (no envelope) when no fee key is given", async () => {
+        const blob = encodeExitBundle(pkg);
+        expect(JSON.parse(blob)).toEqual(pkg);
+        expect(await decodePackageBlob(blob)).toEqual({ pkg });
+    });
+
+    it("drops a malformed fee key rather than embedding it", async () => {
+        const blob = encodeExitBundle(pkg, "not-a-key");
+        expect(await decodePackageBlob(blob)).toEqual({ pkg });
     });
 });
 
