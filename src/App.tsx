@@ -1,6 +1,6 @@
 import type { ExitPackage } from "@arkade-os/sdk";
-import { DoorOpen, RotateCcw } from "lucide-react";
-import { useState } from "react";
+import { DoorOpen, RotateCcw, ShieldAlert } from "lucide-react";
+import { Component, useState, type ReactNode } from "react";
 import { ImportScreen } from "@/components/ImportScreen";
 import { ReviewScreen } from "@/components/ReviewScreen";
 import { RunScreen } from "@/components/RunScreen";
@@ -14,15 +14,58 @@ const STEPS: { id: Screen; label: string }[] = [
     { id: "run", label: "Execute" },
 ];
 
+/**
+ * Defense-in-depth: a malformed package that clears decode validation but still
+ * throws during render must not blank the whole app. Keyed by screen so it
+ * resets on navigation / "Start over". The header (with Start over) lives
+ * outside it, so the user can always recover.
+ */
+class ScreenErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+    state: { error: Error | null } = { error: null };
+    static getDerivedStateFromError(error: Error) {
+        return { error };
+    }
+    render() {
+        if (this.state.error) {
+            return (
+                <div className="flex items-start gap-2 rounded-[var(--radius)] border border-dead/40 bg-dead/10 p-3 text-sm text-dead">
+                    <ShieldAlert className="mt-0.5 size-4 shrink-0" />
+                    <div>
+                        <p className="font-medium">Couldn’t render this package</p>
+                        <p className="mt-0.5 text-xs text-dead/80">
+                            {this.state.error.message}. Use “Start over” to load a different one.
+                        </p>
+                    </div>
+                </div>
+            );
+        }
+        return this.props.children;
+    }
+}
+
 export function App() {
     const [screen, setScreen] = useState<Screen>("import");
     const [pkg, setPkg] = useState<ExitPackage | null>(null);
+    const [feeKeyHex, setFeeKeyHex] = useState<string | null>(null);
     const [esplora, setEsplora] = useState<string>("");
+    const [confirmingReset, setConfirmingReset] = useState(false);
 
     const reset = () => {
         setPkg(null);
+        setFeeKeyHex(null);
         setEsplora("");
         setScreen("import");
+        setConfirmingReset(false);
+    };
+
+    // Once execution has started, guard "Start over": it doesn't stop broadcasts
+    // already made and it discards the live progress view.
+    const onStartOver = () => {
+        if (screen === "run" && !confirmingReset) {
+            setConfirmingReset(true);
+            return;
+        }
+        reset();
     };
 
     const currentIndex = STEPS.findIndex((s) => s.id === screen);
@@ -43,11 +86,28 @@ export function App() {
                         </p>
                     </div>
                 </div>
-                {pkg && (
-                    <Button variant="ghost" size="sm" onClick={reset}>
-                        <RotateCcw className="size-3.5" /> Start over
-                    </Button>
-                )}
+                {pkg &&
+                    (confirmingReset ? (
+                        <div className="flex items-center gap-2">
+                            <span className="hidden text-[11px] text-ink-faint sm:inline">
+                                Broadcasts already sent won’t stop.
+                            </span>
+                            <Button size="sm" variant="danger" onClick={reset}>
+                                <RotateCcw className="size-3.5" /> Confirm start over
+                            </Button>
+                            <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => setConfirmingReset(false)}
+                            >
+                                Cancel
+                            </Button>
+                        </div>
+                    ) : (
+                        <Button variant="ghost" size="sm" onClick={onStartOver}>
+                            <RotateCcw className="size-3.5" /> Start over
+                        </Button>
+                    ))}
             </header>
 
             <nav className="mb-8 flex items-center gap-2">
@@ -86,24 +146,29 @@ export function App() {
             </nav>
 
             <main className="flex-1">
-                {screen === "import" && (
-                    <ImportScreen
-                        onImport={(p) => {
-                            setPkg(p);
-                            setScreen("review");
-                        }}
-                    />
-                )}
-                {screen === "review" && pkg && (
-                    <ReviewScreen
-                        pkg={pkg}
-                        onContinue={(url) => {
-                            setEsplora(url);
-                            setScreen("run");
-                        }}
-                    />
-                )}
-                {screen === "run" && pkg && esplora && <RunScreen pkg={pkg} esploraUrl={esplora} />}
+                <ScreenErrorBoundary key={screen}>
+                    {screen === "import" && (
+                        <ImportScreen
+                            onImport={(loaded) => {
+                                setPkg(loaded.pkg);
+                                setFeeKeyHex(loaded.feeKeyHex ?? null);
+                                setScreen("review");
+                            }}
+                        />
+                    )}
+                    {screen === "review" && pkg && (
+                        <ReviewScreen
+                            pkg={pkg}
+                            onContinue={(url) => {
+                                setEsplora(url);
+                                setScreen("run");
+                            }}
+                        />
+                    )}
+                    {screen === "run" && pkg && esplora && (
+                        <RunScreen pkg={pkg} esploraUrl={esplora} embeddedFeeKeyHex={feeKeyHex} />
+                    )}
+                </ScreenErrorBoundary>
             </main>
 
             <footer className="mt-10 border-t border-line pt-4 text-[11px] text-ink-faint">
