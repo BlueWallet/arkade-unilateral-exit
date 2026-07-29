@@ -1,7 +1,7 @@
 import type { ExitPackage } from "@arkade-os/sdk";
 import { AlertTriangle, ArrowRight, Clock, Eye } from "lucide-react";
 import { useMemo, useState } from "react";
-import { defaultEsploraFor } from "@/lib/esplora";
+import { esploraUrlFor } from "@/lib/esplora";
 import { btc, cn, formatSats, truncateMiddle } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -23,7 +23,7 @@ export function ReviewScreen({
     pkg: ExitPackage;
     onContinue: (esploraUrl: string) => void;
 }) {
-    const [esplora, setEsplora] = useState(defaultEsploraFor(pkg.network));
+    const [esplora, setEsplora] = useState(() => esploraUrlFor(pkg.network));
     const active = pkg.vtxos.filter((v) => !v.skipped);
     const skipped = pkg.vtxos.filter((v) => v.skipped);
     const graph = pkg.mode === "graph";
