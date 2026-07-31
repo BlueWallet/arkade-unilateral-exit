@@ -20,12 +20,20 @@ export function RunScreen({
     pkg,
     esploraUrl,
     embeddedFeeKeyHex,
+    sessionSaved,
+    onComplete,
 }: {
     pkg: ExitPackage;
     esploraUrl: string;
     /** Fee key carried inside a self-executable bundle; funds the graph-mode CPFP
      * bumps from an already-funded address instead of a freshly generated one. */
     embeddedFeeKeyHex?: string | null;
+    /** Whether this exit is genuinely recoverable from this browser. False when
+     * the save was rejected (quota, blocked storage) — the reassurance must not
+     * promise a resume point that does not exist. */
+    sessionSaved?: boolean;
+    /** Called once when every step finished with no failures. */
+    onComplete?: () => void;
 }) {
     const graph = pkg.mode === "graph";
     // Graph mode always shows the funding gate — even with an embedded fee key it
@@ -83,17 +91,29 @@ export function RunScreen({
     if (graph && !fee)
         return feeError ? feeErrorBanner : <Centered>Preparing fee wallet…</Centered>;
 
-    return <ExecutionTimeline pkg={pkg} provider={provider} feeWallet={fee?.wallet} />;
+    return (
+        <ExecutionTimeline
+            pkg={pkg}
+            provider={provider}
+            feeWallet={fee?.wallet}
+            sessionSaved={sessionSaved}
+            onComplete={onComplete}
+        />
+    );
 }
 
 function ExecutionTimeline({
     pkg,
     provider,
     feeWallet,
+    sessionSaved,
+    onComplete,
 }: {
     pkg: ExitPackage;
     provider: EsploraProvider;
     feeWallet?: FeeWalletHandle["wallet"];
+    sessionSaved?: boolean;
+    onComplete?: () => void;
 }) {
     const [events, setEvents] = useState<Map<number, ExecutorEvent>>(new Map());
     const [warnings, setWarnings] = useState<string[]>([]);
@@ -165,6 +185,13 @@ function ExecutionTimeline({
     const failed = [...events.values()].filter((e) => e.status === "failed").length;
     const pct = pkg.steps.length ? (confirmed / pkg.steps.length) * 100 : 0;
 
+    // Report a clean finish so the caller can drop the saved session. Failures
+    // are deliberately not reported — a failed exit stays saved so it can be
+    // retried. `done` only flips once, so this fires at most once.
+    useEffect(() => {
+        if (done && failed === 0) onComplete?.();
+    }, [done, failed, onComplete]);
+
     return (
         <div className="flex flex-col gap-5">
             <Card>
@@ -191,12 +218,23 @@ function ExecutionTimeline({
                         value={pct}
                         indicatorClassName={failed ? "bg-dead" : done ? "bg-ok" : "bg-signal"}
                     />
-                    {!done && (
-                        <p className="text-[11px] text-ink-faint">
-                            Safe to close and reopen — execution reads only the blockchain, so it
-                            resumes where it left off.
-                        </p>
-                    )}
+                    {!done &&
+                        (sessionSaved ? (
+                            <p className="text-[11px] text-ink-faint">
+                                Safe to close and reopen — this exit is saved in this browser and
+                                execution reads only the blockchain, so it resumes where it left
+                                off. Keep your package file to resume anywhere else.
+                            </p>
+                        ) : (
+                            // The save was rejected, so there is no resume point here.
+                            // Promising one would be the exact failure this whole
+                            // change set exists to remove.
+                            <p className="text-[11px] text-wait">
+                                This browser could not save a resume point — keep your package file,
+                                you will need it to continue. Execution reads only the blockchain,
+                                so re-importing resumes where it left off.
+                            </p>
+                        ))}
                 </CardContent>
             </Card>
 
