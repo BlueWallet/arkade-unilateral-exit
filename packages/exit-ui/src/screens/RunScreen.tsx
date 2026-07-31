@@ -6,13 +6,23 @@ import {
 } from "@arkade-os/sdk";
 import { CheckCircle2, CircleAlert, Loader2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { loadOrCreateFeeKey, makeFeeWallet, type FeeWalletHandle } from "@/lib/feeWallet";
-import { KIND_LABEL, PHASE_STYLE, phaseFor, type StepPhase } from "@/components/stepMeta";
-import { CopyableHash } from "@/components/CopyableHash";
-import { FundingGate } from "@/components/FundingGate";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
-import { cn } from "@/lib/utils";
+import {
+    Card,
+    CardContent,
+    CardHeader,
+    CardTitle,
+    CopyableHash,
+    KIND_LABEL,
+    PHASE_STYLE,
+    Progress,
+    cn,
+    loadOrCreateFeeKey,
+    makeFeeWallet,
+    phaseFor,
+    type FeeWalletHandle,
+    type StepPhase,
+} from "../index";
+import { FundingGate } from "./FundingGate";
 
 type RunPhase = "funding" | "running";
 
@@ -21,6 +31,7 @@ export function RunScreen({
     esploraUrl,
     embeddedFeeKeyHex,
     sessionSaved,
+    onFeeKeyRegenerated,
     onComplete,
 }: {
     pkg: ExitPackage;
@@ -28,6 +39,11 @@ export function RunScreen({
     /** Fee key carried inside a self-executable bundle; funds the graph-mode CPFP
      * bumps from an already-funded address instead of a freshly generated one. */
     embeddedFeeKeyHex?: string | null;
+    /** Fired when the user mints a new fee key, so the caller can persist it.
+     * `feeKeyNonce` below is local state and resets on remount, so without this
+     * a reload would fall back to the bundle's original key and show the old
+     * funding address. */
+    onFeeKeyRegenerated?: (newFeeKeyHex: string) => void;
     /** Whether this exit is genuinely recoverable from this browser. False when
      * the save was rejected (quota, blocked storage) — the reassurance must not
      * promise a resume point that does not exist. */
@@ -68,7 +84,7 @@ export function RunScreen({
     }, [graph, pkg.network, esploraUrl, embeddedFeeKeyHex, feeKeyNonce]);
 
     const feeErrorBanner = feeError ? (
-        <div className="rounded-[var(--radius)] border border-dead/40 bg-dead/10 p-3 text-sm text-dead">
+        <div className="rounded-[var(--radius-exit)] border border-exit-dead/40 bg-exit-dead/10 p-3 text-sm text-exit-dead">
             Couldn’t prepare the fee wallet: {feeError}
         </div>
     ) : null;
@@ -82,7 +98,10 @@ export function RunScreen({
                 required={pkg.totals.fundingRequiredSats}
                 pkg={pkg}
                 onReady={() => setPhase("running")}
-                onRegenerate={() => setFeeKeyNonce((n) => n + 1)}
+                onRegenerate={(newKey) => {
+                    setFeeKeyNonce((n) => n + 1);
+                    onFeeKeyRegenerated?.(newKey);
+                }}
             />
         );
     }
@@ -208,19 +227,21 @@ function ExecutionTimeline({
                     <StatusPill done={done} failed={failed} fatal={!!fatal} />
                 </CardHeader>
                 <CardContent className="flex flex-col gap-2">
-                    <div className="flex justify-between text-xs text-ink-dim">
+                    <div className="flex justify-between text-xs text-exit-ink-dim">
                         <span>
                             {confirmed} / {pkg.steps.length} transactions onchain
                         </span>
-                        {failed > 0 && <span className="text-dead">{failed} failed</span>}
+                        {failed > 0 && <span className="text-exit-dead">{failed} failed</span>}
                     </div>
                     <Progress
                         value={pct}
-                        indicatorClassName={failed ? "bg-dead" : done ? "bg-ok" : "bg-signal"}
+                        indicatorClassName={
+                            failed ? "bg-exit-dead" : done ? "bg-exit-ok" : "bg-exit-signal"
+                        }
                     />
                     {!done &&
                         (sessionSaved ? (
-                            <p className="text-[11px] text-ink-faint">
+                            <p className="text-[11px] text-exit-ink-faint">
                                 Safe to close and reopen — this exit is saved in this browser and
                                 execution reads only the blockchain, so it resumes where it left
                                 off. Keep your package file to resume anywhere else.
@@ -229,7 +250,7 @@ function ExecutionTimeline({
                             // The save was rejected, so there is no resume point here.
                             // Promising one would be the exact failure this whole
                             // change set exists to remove.
-                            <p className="text-[11px] text-wait">
+                            <p className="text-[11px] text-exit-wait">
                                 This browser could not save a resume point — keep your package file,
                                 you will need it to continue. Execution reads only the blockchain,
                                 so re-importing resumes where it left off.
@@ -241,7 +262,7 @@ function ExecutionTimeline({
             {warnings.map((w, i) => (
                 <div
                     key={i}
-                    className="flex items-start gap-2 rounded-[var(--radius)] border border-wait/40 bg-wait/10 p-3 text-xs text-wait"
+                    className="flex items-start gap-2 rounded-[var(--radius-exit)] border border-exit-wait/40 bg-exit-wait/10 p-3 text-xs text-exit-wait"
                 >
                     <CircleAlert className="mt-0.5 size-4 shrink-0" />
                     <span>{w}</span>
@@ -249,7 +270,7 @@ function ExecutionTimeline({
             ))}
 
             {fatal && (
-                <div className="rounded-[var(--radius)] border border-dead/40 bg-dead/10 p-3 text-sm text-dead">
+                <div className="rounded-[var(--radius-exit)] border border-exit-dead/40 bg-exit-dead/10 p-3 text-sm text-exit-dead">
                     Executor stopped: {fatal}
                 </div>
             )}
@@ -261,6 +282,12 @@ function ExecutionTimeline({
                         index={i}
                         last={i === pkg.steps.length - 1}
                         kindLabel={KIND_LABEL[step.kind]}
+                        // Every ExitStep kind carries exactly one identifying
+                        // txid: `broadcast` and `sweep` use `txid`, `package`
+                        // and `bump` use `parentTxid` (their child is derived).
+                        // The cast holds as long as that stays true; a new kind
+                        // with neither field would surface here as an empty hash
+                        // rather than a crash.
                         txid={
                             "txid" in step ? step.txid : (step as { parentTxid: string }).parentTxid
                         }
@@ -300,25 +327,28 @@ function TimelineRow({
             <div className="flex flex-col items-center">
                 <span
                     className={cn(
-                        "mt-1 flex size-3.5 items-center justify-center rounded-full border-2 bg-field",
+                        "mt-1 flex size-3.5 items-center justify-center rounded-full border-2 bg-exit-field",
                         s.ring,
                     )}
                 >
                     <span className={cn("size-1.5 rounded-full", s.dot)} />
                 </span>
-                {!last && <span className="w-px flex-1 bg-line" />}
+                {!last && <span className="w-px flex-1 bg-exit-line" />}
             </div>
             <div className="flex flex-1 items-start justify-between gap-3 pb-6">
                 <div className="flex flex-col gap-0.5">
-                    <span className="text-sm text-ink">
-                        <span className="text-ink-faint tabular">{index + 1}.</span> {kindLabel}
+                    <span className="text-sm text-exit-ink">
+                        <span className="text-exit-ink-faint font-mono tabular-nums tracking-[-0.01em]">
+                            {index + 1}.
+                        </span>{" "}
+                        {kindLabel}
                     </span>
                     <CopyableHash value={txid} />
                     {event?.reason && (phase === "failed" || phase === "skipped") && (
                         <span
                             className={cn(
                                 "text-xs",
-                                phase === "failed" ? "text-dead/80" : "text-ink-faint",
+                                phase === "failed" ? "text-exit-dead/80" : "text-exit-ink-faint",
                             )}
                         >
                             {event.reason}
@@ -328,7 +358,7 @@ function TimelineRow({
                 <div className="flex flex-col items-end gap-0.5">
                     <span className={cn("text-xs font-medium", s.text)}>{s.label}</span>
                     {blocksLeft !== null && (
-                        <span className="tabular text-[11px] text-wait">
+                        <span className="font-mono tabular-nums tracking-[-0.01em] text-[11px] text-exit-wait">
                             ~{blocksLeft} block{blocksLeft === 1 ? "" : "s"} left
                         </span>
                     )}
@@ -341,24 +371,24 @@ function TimelineRow({
 function StatusPill({ done, failed, fatal }: { done: boolean; failed: number; fatal: boolean }) {
     if (fatal)
         return (
-            <span className="flex items-center gap-1.5 text-xs text-dead">
+            <span className="flex items-center gap-1.5 text-xs text-exit-dead">
                 <CircleAlert className="size-3.5" /> stopped
             </span>
         );
     if (!done)
         return (
-            <span className="flex items-center gap-1.5 text-xs text-flight">
+            <span className="flex items-center gap-1.5 text-xs text-exit-flight">
                 <Loader2 className="size-3.5 animate-spin" /> running
             </span>
         );
     if (failed)
         return (
-            <span className="flex items-center gap-1.5 text-xs text-dead">
+            <span className="flex items-center gap-1.5 text-xs text-exit-dead">
                 <CircleAlert className="size-3.5" /> partial
             </span>
         );
     return (
-        <span className="flex items-center gap-1.5 text-xs text-ok">
+        <span className="flex items-center gap-1.5 text-xs text-exit-ok">
             <CheckCircle2 className="size-3.5" /> done
         </span>
     );
@@ -366,7 +396,7 @@ function StatusPill({ done, failed, fatal }: { done: boolean; failed: number; fa
 
 function Centered({ children }: { children: React.ReactNode }) {
     return (
-        <div className="flex items-center justify-center gap-2 py-16 text-sm text-ink-dim">
+        <div className="flex items-center justify-center gap-2 py-16 text-sm text-exit-ink-dim">
             <Loader2 className="size-4 animate-spin" /> {children}
         </div>
     );

@@ -1,5 +1,15 @@
 @import "tailwindcss";
 
+/* Tailwind does not scan dependencies unless told to. Without this, every class
+   inside @arkade-os/exit-ui compiles to nothing and its components render
+   unstyled — which no typecheck, test or build would catch.
+
+   Deliberately the node_modules path to the *built* output rather than
+   ../packages/exit-ui/src: it is exactly what a consumer outside this repo has
+   to write, so this app exercises the same mechanism the explorer will, and it
+   scans precisely what ships. Class strings survive tsup unmangled. */
+@source "../node_modules/@arkade-os/exit-ui/dist";
+
 /*
  * "Operator console" design system. Deliberately NOT the shadcn violet
  * default: a near-black slate field, warm off-white text, one restrained
@@ -28,6 +38,27 @@
     --color-dead: #e06a6a;
 
     --radius: 0.5rem;
+
+    /*
+     * The @arkade-os/exit-ui theming contract. The package styles itself against
+     * these names only, so mapping them onto this app's palette is all it takes
+     * for its components to wear the operator-console look. The explorer will
+     * map the same names onto its own tokens.
+     */
+    --color-exit-field: var(--color-field);
+    --color-exit-panel: var(--color-panel);
+    --color-exit-panel-2: var(--color-panel-2);
+    --color-exit-line: var(--color-line);
+    --color-exit-ink: var(--color-ink);
+    --color-exit-ink-dim: var(--color-ink-dim);
+    --color-exit-ink-faint: var(--color-ink-faint);
+    --color-exit-signal: var(--color-signal);
+    --color-exit-signal-ink: var(--color-signal-ink);
+    --color-exit-ok: var(--color-ok);
+    --color-exit-flight: var(--color-flight);
+    --color-exit-wait: var(--color-wait);
+    --color-exit-dead: var(--color-dead);
+    --radius-exit: var(--radius);
 }
 
 html {
@@ -43,22 +74,7 @@ body {
     min-height: 100vh;
 }
 
-/* Numeric/hex data reads as data, not prose. */
-.tabular {
-    font-family: var(--font-mono);
-    font-variant-numeric: tabular-nums;
-    letter-spacing: -0.01em;
-}
-
-@keyframes pulse-flight {
-    0%,
-    100% {
-        opacity: 1;
-    }
-    50% {
-        opacity: 0.35;
-    }
-}
-.pulse {
-    animation: pulse-flight 1.4s ease-in-out infinite;
-}
+/* `.tabular` and `.pulse` used to live here. The exit UI moved into
+   @arkade-os/exit-ui, which cannot depend on classes an app happens to define,
+   so it uses plain Tailwind utilities instead (`font-mono tabular-nums
+   tracking-[-0.01em]`, `animate-pulse`). Nothing references the old rules. */

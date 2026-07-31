@@ -1,5 +1,5 @@
 import type { ExitPackage } from "@arkade-os/sdk";
-import { FEE_KEY_RE, packageParamFromUrl, parsePackageObject } from "@/lib/package";
+import { FEE_KEY_RE, packageParamFromUrl, parsePackageObject } from "./package";
 
 /**
  * Where a resumable exit is kept.
@@ -39,7 +39,7 @@ export interface SessionStore {
     removeItem(key: string): void;
 }
 
-function defaultStore(): SessionStore | null {
+export function defaultStore(): SessionStore | null {
     try {
         return globalThis.localStorage ?? null;
     } catch {

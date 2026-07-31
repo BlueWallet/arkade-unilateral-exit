@@ -7,7 +7,7 @@ import {
     restoreSession,
     saveSession,
     type SessionStore,
-} from "./session";
+} from "../src/session";
 
 const pkg: ExitPackage = {
     version: 1,

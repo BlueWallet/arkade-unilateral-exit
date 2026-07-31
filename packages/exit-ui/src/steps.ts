@@ -32,31 +32,50 @@ export function phaseFor(status: ExecutorEvent["status"], reason?: string): Step
     }
 }
 
+/**
+ * Presentation for each phase, against the `--color-exit-*` contract, so it
+ * renders in whichever palette the consuming app supplies.
+ */
 export const PHASE_STYLE: Record<
     StepPhase,
     { dot: string; ring: string; label: string; text: string }
 > = {
-    pending: { dot: "bg-ink-faint", ring: "border-line", label: "Pending", text: "text-ink-faint" },
+    pending: {
+        dot: "bg-exit-ink-faint",
+        ring: "border-exit-line",
+        label: "Pending",
+        text: "text-exit-ink-faint",
+    },
     active: {
-        dot: "bg-flight pulse",
-        ring: "border-flight",
+        dot: "bg-exit-flight animate-pulse",
+        ring: "border-exit-flight",
         label: "In flight",
-        text: "text-flight",
+        text: "text-exit-flight",
     },
     waiting: {
-        dot: "bg-wait",
-        ring: "border-wait",
+        dot: "bg-exit-wait",
+        ring: "border-exit-wait",
         label: "Waiting for timelock",
-        text: "text-wait",
+        text: "text-exit-wait",
     },
-    confirmed: { dot: "bg-ok", ring: "border-ok", label: "Confirmed", text: "text-ok" },
-    failed: { dot: "bg-dead", ring: "border-dead", label: "Failed", text: "text-dead" },
+    confirmed: {
+        dot: "bg-exit-ok",
+        ring: "border-exit-ok",
+        label: "Confirmed",
+        text: "text-exit-ok",
+    },
+    failed: {
+        dot: "bg-exit-dead",
+        ring: "border-exit-dead",
+        label: "Failed",
+        text: "text-exit-dead",
+    },
     // Reached only when the executor gave a reason — i.e. the branch failed
     // upstream. Must read as neutral, never as a green success.
     skipped: {
-        dot: "bg-ink-faint",
-        ring: "border-line",
+        dot: "bg-exit-ink-faint",
+        ring: "border-exit-line",
         label: "Skipped",
-        text: "text-ink-faint",
+        text: "text-exit-ink-faint",
     },
 };
